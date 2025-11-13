@@ -1,0 +1,44 @@
+services:
+  backend:
+    build: ./backend
+    container_name: backend_app
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./backend:/app
+      - ./frontend:/app/frontend
+    depends_on:
+      - ollama
+      - whisper
+      - tts
+    restart: always
+
+  ollama:
+    image: ollama/ollama
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+  whisper:
+    image: onerahmet/openai-whisper-asr-webservice:latest
+    container_name: whisper_app
+    ports:
+      - "8090:9000"
+    environment:
+      - ASR_MODEL=base
+      - ASR_ENGINE=openai_whisper
+    restart: unless-stopped
+
+  tts:
+    build: ./tts
+    container_name: tts_app
+    ports:
+      - "5002:5002"
+    restart: unless-stopped
+
+volumes:
+  ollama_data:
+    external: false

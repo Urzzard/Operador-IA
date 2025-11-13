@@ -1,0 +1,5 @@
+backend/venv
+backend/frontend
+models/
+models/ggml-base.bin
+backend/.env

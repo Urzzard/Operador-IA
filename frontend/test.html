@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <title>Prueba de Annyang</title>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/annyang/2.6.1/annyang.min.js"></script>
+</head>
+<body>
+    <h1>Prueba de Reconocimiento de Voz</h1>
+    <button onclick="iniciar()">Iniciar Prueba de Micrófono</button>
+    <p id="estado">Listo.</p>
+
+    <script>
+        function iniciar() {
+            console.log("Botón presionado. Intentando iniciar annyang...");
+            document.getElementById('estado').textContent = 'Intentando iniciar...';
+
+            if (annyang) {
+                annyang.addCallback('start', function() {
+                    console.log("¡ÉXITO! Annyang ha comenzado a escuchar.");
+                    document.getElementById('estado').textContent = '¡Escuchando! Di algo.';
+                });
+
+                annyang.addCallback('error', function(error) {
+                    console.error("ERROR de Annyang:", error);
+                    document.getElementById('estado').textContent = 'Error: ' + error.error;
+                });
+
+                annyang.start({ autoRestart: false, continuous: false });
+            } else {
+                console.error("Annyang no está disponible.");
+                document.getElementById('estado').textContent = 'Annyang no disponible.';
+            }
+        }
+    </script>
+</body>
+</html>

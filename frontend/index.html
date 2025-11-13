@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Teleoperador IA - MVP</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f3f4f6;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 20px;
+    }
+    h1 {
+      color: #222;
+    }
+    .chat-box {
+      width: 100%;
+      max-width: 1000px;
+      background: white;
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+    #messages {
+      height: 500px;
+      overflow-y: auto;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 10px;
+      margin-bottom: 10px;
+      display: flex;
+      flex-direction: column;
+    }
+    .msg-user {
+      align-self: flex-end;
+      background-color: #007bff;
+      color: white;
+      padding: 8px 12px;
+      border-radius: 15px 15px 0 15px;
+      margin-bottom: 10px;
+      max-width: 80%;
+      text-align: right;
+    }
+    .msg-bot {
+      align-self: flex-start;
+      background-color: #e9e9eb;
+      color: #333;
+      padding: 8px 12px;
+      border-radius: 15px 15px 15px 0;
+      margin-bottom: 10px;
+      max-width: 80%;
+      text-align: left;
+    }
+    .input-area {
+      display: flex;
+      gap: 10px;
+    }
+    input {
+      flex: 1;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+    }
+    button {
+      padding: 8px 12px;
+      border: none;
+      border-radius: 5px;
+      background: #007bff;
+      color: white;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    button#btn-hablar { 
+        background-color: #28a745;
+    }
+    button#btn-hablar.recording { 
+        background-color: #dc3545;
+        animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+    button:hover:not(:disabled) {
+      opacity: 0.9;
+    }
+    #status { 
+        margin-top: 10px;
+        color: #6c757d;
+        min-height: 20px;
+        font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Teleoperador IA 🤖</h1>
+  <div class="chat-box">
+    <div id="messages"></div>
+    <div class="input-area">
+      <input type="text" id="mensaje" placeholder="Escribe tu mensaje o usa el botón de hablar..." onkeydown="if(event.key === 'Enter') enviar()" />
+      <button onclick="enviar()" id="btn-enviar">Enviar</button>
+      <button id="btn-hablar" onclick="toggleRecording()">🎤 Hablar</button>
+    </div>
+    <p id="status">Haz clic en "Hablar" para grabar tu voz.</p>
+  </div>
+
+  <script>
+    let conversationHistory = [];
+    let mediaRecorder;
+    let audioChunks = [];
+    let isRecording = false;
+
+    async function enviar() {
+      const inputElem = document.getElementById("mensaje");
+      const mensaje = inputElem.value;
+      const messagesContainer = document.getElementById("messages");
+      const btnEnviar = document.getElementById("btn-enviar");
+
+      if (!mensaje.trim()) return;
+
+      const userMsgElem = document.createElement("div");
+      userMsgElem.className = "msg-user";
+      userMsgElem.textContent = mensaje;
+      messagesContainer.appendChild(userMsgElem);
+      
+      conversationHistory.push({ role: "user", content: mensaje });
+
+      inputElem.value = "";
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+      btnEnviar.disabled = true;
+      document.getElementById("status").textContent = "Esperando respuesta...";
+
+      try {
+        const res = await fetch("/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: conversationHistory }),
+        });
+
+        if (!res.ok) {
+            throw new Error(`Error del servidor: ${res.status}`);
+        }
+
+        const data = await res.json();
+        
+        const respuestaTexto = data.respuesta || data.error || "No se recibió una respuesta válida.";
+
+        conversationHistory.push({ role: "assistant", content: respuestaTexto });
+
+        const botMsgElem = document.createElement("div");
+        botMsgElem.className = "msg-bot";
+        botMsgElem.textContent = respuestaTexto;
+        messagesContainer.appendChild(botMsgElem);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+        document.getElementById("status").textContent = "Generando voz...";
+        await playTTS(respuestaTexto);
+
+        document.getElementById("status").textContent = "Listo. Puedes enviar otro mensaje.";
+
+      } catch (error) {
+        console.error("Error:", error);
+        const errorMsgElem = document.createElement("div");
+        errorMsgElem.className = "msg-bot";
+        errorMsgElem.textContent = "Error al conectar con el servidor.";
+        messagesContainer.appendChild(errorMsgElem);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        document.getElementById("status").textContent = "Error de conexión.";
+      } finally {
+        btnEnviar.disabled = false;
+      }
+    }
+
+    async function toggleRecording() {
+      if (isRecording) {
+        stopRecording();
+      } else {
+        await startRecording();
+      }
+    }
+
+    async function startRecording() {
+      const statusElem = document.getElementById('status');
+      const btnHablar = document.getElementById('btn-hablar');
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+        audioChunks = [];
+
+        mediaRecorder.ondataavailable = (event) => {
+          audioChunks.push(event.data);
+        };
+
+        mediaRecorder.onstop = async () => {
+          const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+          await transcribeAudio(audioBlob);
+          stream.getTracks().forEach(track => track.stop());
+        };
+
+        mediaRecorder.start();
+        isRecording = true;
+        btnHablar.classList.add('recording');
+        btnHablar.textContent = '⏹️ Detener';
+        statusElem.textContent = '🔴 Grabando... Haz clic en "Detener" cuando termines.';
+      } catch (error) {
+        console.error('Error al acceder al micrófono:', error);
+        statusElem.textContent = 'Error: No se pudo acceder al micrófono.';
+      }
+    }
+
+    function stopRecording() {
+      const statusElem = document.getElementById('status');
+      const btnHablar = document.getElementById('btn-hablar');
+
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+        isRecording = false;
+        btnHablar.classList.remove('recording');
+        btnHablar.textContent = '🎤 Hablar';
+        statusElem.textContent = 'Procesando audio...';
+      }
+    }
+
+    async function transcribeAudio(audioBlob) {
+      const statusElem = document.getElementById('status');
+      const mensajeInput = document.getElementById('mensaje');
+
+      const formData = new FormData();
+      formData.append('audio', audioBlob, 'recording.webm');
+
+      try {
+        const response = await fetch('/transcribe', {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!response.ok) {
+          throw new Error(`Error al transcribir: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const texto = data.text || '';
+
+        if (texto.trim()) {
+          mensajeInput.value = texto;
+          statusElem.textContent = `Transcrito: "${texto}"`;
+          // Enviar automáticamente después de transcribir
+          setTimeout(() => enviar(), 500);
+        } else {
+          statusElem.textContent = 'No se detectó texto en el audio.';
+        }
+      } catch (error) {
+        console.error('Error en transcripción:', error);
+        statusElem.textContent = 'Error al transcribir el audio.';
+      }
+    }
+
+    async function playTTS(text) {
+      try {
+        const response = await fetch('/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: text })
+        });
+
+        if (!response.ok) {
+          throw new Error(`Error TTS: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const audioBase64 = data.audio;
+
+        // Convertir base64 a blob y reproducir
+        const audioBlob = base64ToBlob(audioBase64, 'audio/wav');
+        const audioUrl = URL.createObjectURL(audioBlob);
+        const audio = new Audio(audioUrl);
+        
+        await audio.play();
+        
+        // Limpiar URL después de reproducir
+        audio.onended = () => {
+          URL.revokeObjectURL(audioUrl);
+        };
+      } catch (error) {
+        console.error('Error al reproducir TTS:', error);
+        document.getElementById("status").textContent += " (Error al reproducir voz)";
+      }
+    }
+
+    function base64ToBlob(base64, mimeType) {
+      const byteCharacters = atob(base64);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      return new Blob([byteArray], { type: mimeType });
+    }
+
+    // Mensaje de bienvenida inicial
+    window.addEventListener('DOMContentLoaded', () => {
+      const messagesContainer = document.getElementById("messages");
+      const welcomeMsg = document.createElement("div");
+      welcomeMsg.className = "msg-bot";
+      welcomeMsg.textContent = "¡Hola! Soy el asistente de Salesland. Estoy aquí para ayudarte en tu incorporación. ¿En qué puedo ayudarte?";
+      messagesContainer.appendChild(welcomeMsg);
+    });
+  </script>
+</body>
+</html>
