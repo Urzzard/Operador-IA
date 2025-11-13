@@ -7,6 +7,9 @@ services:
     volumes:
       - ./backend:/app
       - ./frontend:/app/frontend
+      - ./data:/app/data
+    env_file:
+      - ./backend/.env
     depends_on:
       - ollama
       - whisper

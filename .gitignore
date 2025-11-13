@@ -3,3 +3,4 @@ backend/frontend
 models/
 models/ggml-base.bin
 backend/.env
+backend/__pycache__
