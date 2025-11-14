@@ -1,5 +1,12 @@
+import requests
+import requests
+import threading
+
 class ConversationManager:
     def __init__(self):
+
+        self._precargar_modelo()
+
         # Almacena el estado de cada conversación por call_sid
         self.conversaciones = {}
         
@@ -117,26 +124,117 @@ Juntos lograremos todas tus metas. Tu fecha de inicio es el {empleado['fecha_ini
         self.agregar_mensaje(call_sid, "assistant", bienvenida)
         return bienvenida
     
-    def responder_pregunta(self, call_sid, pregunta, empleado):
-        """Responde preguntas usando el LLM (placeholder por ahora)"""
-        # Aquí integraremos Ollama después
-        # Por ahora, respuestas simples
+    # def responder_pregunta(self, call_sid, pregunta, empleado):
+    #     """Responde preguntas usando el LLM (placeholder por ahora)"""
+    #     # Aquí integraremos Ollama después
+    #     # Por ahora, respuestas simples
         
+    #     pregunta_lower = pregunta.lower()
+        
+    #     if "horario" in pregunta_lower:
+    #         respuesta = f"El horario es {self.info_empresa['horarios']}. ¿Algo más en lo que pueda ayudarte?"
+    #     elif "ubicacion" in pregunta_lower or "dirección" in pregunta_lower or "direccion" in pregunta_lower:
+    #         respuesta = f"La oficina está en {self.info_empresa['ubicacion']}. ¿Necesitas algo más?"
+    #     elif "primer día" in pregunta_lower or "inicio" in pregunta_lower or "comenzar" in pregunta_lower:
+    #         respuesta = f"{self.info_empresa['onboarding']} ¿Tienes otra pregunta?"
+    #     elif "portal" in pregunta_lower or "sistema" in pregunta_lower:
+    #         respuesta = f"El portal del empleado está en {self.info_empresa['portal']}. ¿Algo más?"
+    #     elif "no" in pregunta_lower or "nada" in pregunta_lower or "todo" in pregunta_lower:
+    #         self.conversaciones[call_sid]["etapa"] = "despedida"
+    #         respuesta = "Perfecto. Fue un placer hablar contigo. ¡Te esperamos en tu primer día! Hasta pronto."
+    #     else:
+    #         respuesta = "Para información más detallada, te sugiero revisar el portal del empleado o consultar con RRHH en tu primer día. ¿Hay algo más en lo que pueda ayudarte?"
+        
+    #     self.agregar_mensaje(call_sid, "assistant", respuesta)
+    #     return respuesta
+
+
+
+    def responder_pregunta(self, call_sid, pregunta, empleado):
+        """Responde preguntas usando Ollama (phi4-mini)"""
+        
+        conv = self.conversaciones[call_sid]
+        historial = conv["historial"]
+        
+        # Generar prompt del sistema
+        system_prompt = self.generar_prompt_sistema(empleado)
+        
+        # Construir mensajes para Ollama
+        messages = [
+            {"role": "system", "content": system_prompt}
+        ] + historial
+        
+        print(f"🧠 Llamando a Ollama con {len(historial)} mensajes de historial", flush=True)
+        
+        try:
+            # Llamar a Ollama
+            response = requests.post(
+                "http://ollama:11434/api/chat",
+                json={
+                    "model": "phi4-mini",
+                    "messages": messages,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.7,
+                        "num_predict": 80,  # Limitar respuesta a ~150 tokens (más corta para teléfono)
+                        "num_ctx": 2048,
+                        "num_thread": 4 
+                    }
+                },
+                timeout=60
+            )
+            
+            if response.status_code == 200:
+                respuesta_json = response.json()
+                respuesta_texto = respuesta_json.get("message", {}).get("content", "")
+                
+                print(f"🧠 Ollama respondió: {respuesta_texto}", flush=True)
+                
+                # Limpiar respuesta (a veces el LLM agrega cosas extra)
+                respuesta_texto = respuesta_texto.strip()
+                
+                # Si la respuesta es muy larga, cortarla
+                if len(respuesta_texto) > 500:
+                    respuesta_texto = respuesta_texto[:497] + "..."
+                
+                # Detectar si el usuario quiere terminar
+                if any(word in pregunta.lower() for word in ["no", "nada", "todo", "gracias", "eso es todo", "hasta luego"]):
+                    self.conversaciones[call_sid]["etapa"] = "despedida"
+                    respuesta_texto = "Perfecto. Fue un placer hablar contigo. ¡Te esperamos en tu primer día! Hasta pronto."
+                else:
+                    # Agregar pregunta de seguimiento si no hay
+                    if "?" not in respuesta_texto:
+                        respuesta_texto += " ¿Hay algo más en lo que pueda ayudarte?"
+                
+                self.agregar_mensaje(call_sid, "assistant", respuesta_texto)
+                return respuesta_texto
+            else:
+                print(f"❌ Error de Ollama: {response.status_code}", flush=True)
+                # Fallback a respuesta genérica
+                return self._respuesta_fallback(call_sid, pregunta, empleado)
+                
+        except Exception as e:
+            print(f"❌ Error llamando a Ollama: {e}", flush=True)
+            # Fallback a respuesta genérica
+            return self._respuesta_fallback(call_sid, pregunta, empleado)
+
+    def _respuesta_fallback(self, call_sid, pregunta, empleado):
+        """Respuestas de emergencia si Ollama falla"""
         pregunta_lower = pregunta.lower()
         
         if "horario" in pregunta_lower:
-            respuesta = f"El horario es {self.info_empresa['horarios']}. ¿Algo más en lo que pueda ayudarte?"
+            respuesta = f"El horario es {self.info_empresa['horarios']}. ¿Algo más?"
         elif "ubicacion" in pregunta_lower or "dirección" in pregunta_lower or "direccion" in pregunta_lower:
             respuesta = f"La oficina está en {self.info_empresa['ubicacion']}. ¿Necesitas algo más?"
-        elif "primer día" in pregunta_lower or "inicio" in pregunta_lower or "comenzar" in pregunta_lower:
+        elif "primer día" in pregunta_lower or "inicio" in pregunta_lower:
             respuesta = f"{self.info_empresa['onboarding']} ¿Tienes otra pregunta?"
-        elif "portal" in pregunta_lower or "sistema" in pregunta_lower:
+        elif "portal" in pregunta_lower:
             respuesta = f"El portal del empleado está en {self.info_empresa['portal']}. ¿Algo más?"
-        elif "no" in pregunta_lower or "nada" in pregunta_lower or "todo" in pregunta_lower:
+        elif "no" in pregunta_lower or "nada" in pregunta_lower:
             self.conversaciones[call_sid]["etapa"] = "despedida"
             respuesta = "Perfecto. Fue un placer hablar contigo. ¡Te esperamos en tu primer día! Hasta pronto."
         else:
-            respuesta = "Para información más detallada, te sugiero revisar el portal del empleado o consultar con RRHH en tu primer día. ¿Hay algo más en lo que pueda ayudarte?"
+            respuesta = "Para más información, te sugiero revisar el portal del empleado o consultar con RRHH. ¿Algo más?"
         
         self.agregar_mensaje(call_sid, "assistant", respuesta)
         return respuesta
@@ -144,6 +242,34 @@ Juntos lograremos todas tus metas. Tu fecha de inicio es el {empleado['fecha_ini
     def despedirse(self, call_sid):
         """Despedida final"""
         return "Fue un gusto hablar contigo. ¡Hasta pronto!"
+    
+
+    def _precargar_modelo(self):
+        """Pre-carga el modelo de Ollama para que esté listo"""
+        
+        def cargar():
+            try:
+                print("🔄 Pre-cargando modelo phi4-mini en Ollama...", flush=True)
+                response = requests.post(
+                    "http://ollama:11434/api/generate",
+                    json={
+                        "model": "phi4-mini",
+                        "prompt": "Hola",
+                        "stream": False
+                    },
+                    timeout=60
+                )
+                if response.status_code == 200:
+                    print("✅ Modelo phi4-mini pre-cargado exitosamente", flush=True)
+                else:
+                    print(f"⚠️ No se pudo pre-cargar el modelo: {response.status_code}", flush=True)
+            except Exception as e:
+                print(f"⚠️ Error pre-cargando modelo: {e}", flush=True)
+        
+        thread = threading.Thread(target=cargar)
+        thread.daemon = True
+        thread.start()
+
     
     def obtener_mensaje_inicial(self, empleado):
         """Mensaje inicial de verificación"""
