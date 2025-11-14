@@ -1,4 +1,13 @@
 services:
+
+  gemini-tts:
+    build: ./gemini-tts
+    container_name: gemini_tts_app
+    ports:
+      - "5003:5003"
+    volumes:
+      - ./backend/gemini-tts.json:/app/credentials/gemini-tts.json:ro
+    restart: always
   backend:
     build: ./backend
     container_name: backend_app
@@ -14,6 +23,7 @@ services:
       - ollama
       - whisper
       - tts
+      - gemini-tts
     restart: always
 
   ollama:

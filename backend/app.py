@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, send_file
 from flask_cors import CORS
 import requests
 import os
@@ -9,22 +9,58 @@ from call_manager import CallManager
 from conversation_manager import ConversationManager
 import os
 from dotenv import load_dotenv
+import sys
+import functools
+import uuid
 
 load_dotenv()
 
 call_manager = CallManager()
 conversation_manager = ConversationManager()
 
+def generar_audio_url(texto):
+    """Genera audio con Gemini TTS y devuelve la URL"""
+    try:
+        import requests
+        response = requests.post(
+            "http://gemini-tts:5003/synthesize",
+            json={"text": texto},
+            timeout=5
+        )
+        
+        if response.status_code == 200:
+            # Guardar el audio temporalmente
+            
+            audio_filename = f"{uuid.uuid4()}.mp3"
+            audio_path = f"/app/frontend/temp_audio/{audio_filename}"
+            
+            # Crear directorio si no existe
+            os.makedirs("/app/frontend/temp_audio", exist_ok=True)
+            
+            with open(audio_path, 'wb') as f:
+                f.write(response.content)
+            
+            # Devolver URL accesible
+            base_url = os.getenv('WEBHOOK_BASE_URL', 'http://localhost:5000')
+            return f"{base_url}/temp_audio/{audio_filename}"
+        else:
+            print(f"❌ Error en Gemini TTS: {response.status_code}", flush=True)
+            return None
+            
+    except Exception as e:
+        print(f"❌ Error generando audio: {e}", flush=True)
+        return None
+
 STATIC_DIR = '/app/frontend'
 
 app = Flask(__name__, static_folder=STATIC_DIR)
 CORS(app)
 
-import sys
+
 sys.stdout.flush()
 sys.stderr.flush()
 
-import functools
+
 print = functools.partial(print, flush=True)
 
 
@@ -285,11 +321,22 @@ def twilio_webhook():
             action='/twilio-process-speech',
             method='POST'
         )
-        gather.say(mensaje, language='es-ES')
+
+        audio_url = generar_audio_url(mensaje)
+        if audio_url:
+            gather.play(audio_url)
+        else:
+            gather.say(mensaje, language='es-ES')
+        
         response.append(gather)
         
         # Si no responde después del timeout
-        response.say("No escuché respuesta. ¿Sigues ahí?", language='es-ES')
+        audio_url = generar_audio_url("No escuché respuesta. ¿Sigues ahí?")
+        if audio_url:
+            response.play(audio_url)
+        else:
+            response.say("No escuché respuesta. ¿Sigues ahí?", language='es-ES')
+
         response.redirect('/twilio-webhook')
         
     else:
@@ -338,7 +385,11 @@ def twilio_process_speech():
     # Verificar si debemos continuar o terminar
     if conv['etapa'] == 'despedida':
         print("👋 Despedida - colgando", flush=True)
-        response.say(respuesta_bot, language='es-ES')
+        audio_url = generar_audio_url(respuesta_bot)
+        if audio_url:
+            response.play(audio_url)
+        else:
+            response.say(respuesta_bot, language='es-ES')
         response.hangup()
     else:
         print("➡️ Continuando conversación", flush=True)
@@ -351,11 +402,22 @@ def twilio_process_speech():
             action='/twilio-process-speech',
             method='POST'
         )
-        gather.say(respuesta_bot, language='es-ES')
+        
+        audio_url = generar_audio_url(respuesta_bot)
+        if audio_url:
+            gather.play(audio_url)
+        else:
+            gather.say(respuesta_bot, language='es-ES')
+        
         response.append(gather)
         
         # Si no responde
-        response.say("¿Sigues ahí? ¿Hay algo más en lo que pueda ayudarte?", language='es-ES')
+        audio_url = generar_audio_url("¿Sigues ahí? ¿Hay algo más en lo que pueda ayudarte?")
+        if audio_url:
+            response.play(audio_url)
+        else:
+            response.say("¿Sigues ahí? ¿Hay algo más en lo que pueda ayudarte?", language='es-ES')
+        
         gather2 = Gather(
             input='speech',
             language='es-ES',
@@ -364,7 +426,13 @@ def twilio_process_speech():
             action='/twilio-process-speech',
             method='POST'
         )
-        gather2.say("Si no necesitas nada más, puedes colgar.", language='es-ES')
+        
+        audio_url2 = generar_audio_url("Si no necesitas nada más, puedes colgar.")
+        if audio_url2:
+            gather2.play(audio_url2)
+        else:
+            gather2.say("Si no necesitas nada más, puedes colgar.", language='es-ES')
+            
         response.append(gather2)
         response.hangup()
     
@@ -395,6 +463,12 @@ def listar_empleados():
     """Lista todos los empleados disponibles"""
     empleados = call_manager.cargar_empleados()
     return jsonify({"empleados": empleados})
+
+
+@app.route("/temp_audio/<filename>", methods=["GET"])
+def serve_audio(filename):
+    """Sirve archivos de audio temporales"""
+    return send_file(f"/app/frontend/temp_audio/{filename}", mimetype='audio/mp3')
 
 
 if __name__ == "__main__":

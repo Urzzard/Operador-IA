@@ -1,6 +1,10 @@
 backend/venv
 backend/frontend
-models/
-models/ggml-base.bin
 backend/.env
 backend/__pycache__
+backend/gemini-tts.json
+
+frontend/temp_audio
+
+models/
+models/ggml-base.bin
