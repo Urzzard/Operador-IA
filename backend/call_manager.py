@@ -18,6 +18,7 @@ class CallManager:
         """Carga la lista de empleados desde CSV"""
         try:
             df = pd.read_csv('/app/data/empleados.csv')
+            df['telefono'] = df['telefono'].astype(str).str.strip()
             return df.to_dict('records')
         except Exception as e:
             print(f"Error cargando empleados: {e}")

@@ -4,3 +4,6 @@ Flask-Cors
 twilio
 pandas
 python-dotenv
+flask-sock
+gunicorn
+gevent-websocket 

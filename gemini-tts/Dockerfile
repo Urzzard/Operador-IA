@@ -4,9 +4,8 @@ WORKDIR /app
 
 # Instalar dependencias
 RUN pip install --no-cache-dir \
-    google-cloud-texttospeech>=2.17.0 \
-    flask \
-    pydub
+    google-cloud-texttospeech \
+    flask
 
 # Instalar ffmpeg para procesamiento de audio
 RUN apt-get update && \

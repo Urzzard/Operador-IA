@@ -1,28 +1,27 @@
-from flask import Flask, request, send_file, jsonify
-from google.cloud import texttospeech
-import os
-import io
+from flask import Flask, request, jsonify, Response
+from google.cloud import texttospeech_v1beta1 as texttospeech
+from google.oauth2 import service_account
 import hashlib
+import re
 
 app = Flask(__name__)
 
-# Configurar credenciales de Google Cloud
-os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = '/app/credentials/gemini-tts.json'
+# Autenticación
+credentials = service_account.Credentials.from_service_account_file(
+    '/app/gemini-tts.json'
+)
+client = texttospeech.TextToSpeechClient(credentials=credentials)
 
-# Inicializar cliente de Google TTS
-client = texttospeech.TextToSpeechClient()
-
-# Cache para archivos generados
+# Cache
 audio_cache = {}
 
 print("✅ Servidor de Gemini TTS iniciado", flush=True)
 
-@app.route('/health', methods=['GET'])
-def health():
-    return jsonify({"status": "ok", "service": "gemini-tts"})
-
 @app.route('/synthesize', methods=['POST'])
 def synthesize():
+    """
+    Genera audio usando Gemini TTS SIN prompts (más estable).
+    """
     try:
         data = request.get_json()
         text = data.get('text', '')
@@ -30,61 +29,96 @@ def synthesize():
         if not text:
             return jsonify({"error": "No text provided"}), 400
         
-        print(f"🎤 Generando audio para: {text[:50]}...", flush=True)
+        print(f"🎤 Generando audio: {text[:50]}...", flush=True)
         
-        # Generar hash del texto para cache
+        # Sanitizar texto (evitar errores de contenido)
+        text = sanitizar_texto(text)
+        
+        # Hash para cache
         text_hash = hashlib.md5(text.encode()).hexdigest()
         
-        # Verificar si ya existe en cache
+        # Verificar cache
         if text_hash in audio_cache:
-            print(f"📦 Usando audio cacheado", flush=True)
-            return send_file(
-                io.BytesIO(audio_cache[text_hash]),
-                mimetype='audio/mp3',
-                as_attachment=False,
-                download_name='speech.mp3'
+            print(f"📦 Cache", flush=True)
+            return Response(
+                audio_cache[text_hash],
+                mimetype='audio/mpeg',
+                headers={'Content-Type': 'audio/mpeg'}
             )
         
-        # Configurar el texto de entrada
-        synthesis_input = texttospeech.SynthesisInput(text=text)
-
-        # Configurar la voz (español latinoamericano, femenina, neural)
-        voice = texttospeech.VoiceSelectionParams(
-            language_code="es-US",  # Español latinoamericano
-            name="es-US-Neural2-A",  # Voz femenina neural de alta calidad
-            ssml_gender=texttospeech.SsmlVoiceGender.FEMALE
-        )
-
-        # Configurar el audio de salida
-        audio_config = texttospeech.AudioConfig(
-            audio_encoding=texttospeech.AudioEncoding.MP3,
-            speaking_rate=1.0,  # Velocidad normal
-            pitch=0.0           # Tono normal
+        # ✅ SIN PROMPT - Voz natural de Gemini
+        synthesis_input = texttospeech.SynthesisInput(
+            text=text  # ⬅️ SOLO el texto, SIN prompt
         )
         
-        # Generar el audio
+        # Configurar voz
+        voice = texttospeech.VoiceSelectionParams(
+            language_code="es-ES",
+            name="Achernar",  
+            model_name="gemini-2.5-flash-tts"
+        )
+        
+        # Audio config
+        audio_config = texttospeech.AudioConfig(
+            audio_encoding=texttospeech.AudioEncoding.MP3,
+            sample_rate_hertz=24000,
+            speaking_rate=1.05,  # ⬆️ Ligeramente más rápido
+            pitch=0.0
+        )
+        
+        # Sintetizar
         response = client.synthesize_speech(
             input=synthesis_input,
             voice=voice,
             audio_config=audio_config
         )
         
-        # Guardar en cache
-        audio_cache[text_hash] = response.audio_content
+        audio_data = response.audio_content
         
-        print(f"✅ Audio generado exitosamente ({len(response.audio_content)} bytes)", flush=True)
+        # Cache
+        audio_cache[text_hash] = audio_data
         
-        # Devolver el audio
-        return send_file(
-            io.BytesIO(response.audio_content),
-            mimetype='audio/mp3',
-            as_attachment=False,
-            download_name='speech.mp3'
+        print(f"✅ {len(audio_data)} bytes", flush=True)
+        
+        return Response(
+            audio_data,
+            mimetype='audio/mpeg',
+            headers={'Content-Type': 'audio/mpeg'}
         )
         
     except Exception as e:
-        print(f"❌ Error generando audio: {e}", flush=True)
+        print(f"❌ Error: {e}", flush=True)
         return jsonify({"error": str(e)}), 500
+
+
+def sanitizar_texto(text):
+    """
+    Limpia el texto para evitar errores de 'contenido sensible'.
+    """
+    # Convertir URLs a texto legible
+    text = re.sub(r'https?://[^\s]+', 'ver portal del empleado', text)
+    
+    # Limpiar caracteres especiales que puedan causar problemas
+    text = text.replace('RRHH', 'recursos humanos')
+    
+    # Eliminar saltos de línea múltiples
+    text = re.sub(r'\n+', ' ', text)
+    
+    # Eliminar espacios extras
+    text = re.sub(r'\s+', ' ', text).strip()
+    
+    return text
+
+
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({
+        "status": "ok", 
+        "service": "gemini-tts",
+        "model": "gemini-2.5-flash-tts",
+        "voice": "Achernar"
+    })
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5003, debug=False)

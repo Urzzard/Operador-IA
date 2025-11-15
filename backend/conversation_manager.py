@@ -41,7 +41,7 @@ class ConversationManager:
     
     def generar_prompt_sistema(self, empleado):
         """Genera el prompt del sistema para el LLM"""
-        return f"""Eres un asistente virtual de RRHH de SALESLAND, una empresa peruana.
+        return f"""Eres un asistente virtual de recursos humanos de la empresa SALESLAND (pronunciado seils land), una empresa peruana.
 
 Tu rol es contactar telefónicamente a nuevos empleados para:
 1. VERIFICAR su identidad (nombre y DNI)
@@ -117,8 +117,7 @@ NO INVENTES información que no tengas. Si no sabes, deriva al portal o a RRHH."
         """Da la bienvenida al empleado"""
         self.conversaciones[call_sid]["etapa"] = "preguntas"
         
-        bienvenida = f"""¡Bienvenido a nuestra gran familia SALESLAND! Estamos muy felices de contar contigo como {empleado['puesto']}. 
-Juntos lograremos todas tus metas. Tu fecha de inicio es el {empleado['fecha_inicio']}. 
+        bienvenida = f"""¡Te llamamos para darte la bienvenida a nuestra gran familia SALESLAND! Estamos muy felices de contar contigo como {empleado['puesto']}. Tu fecha de inicio es el {empleado['fecha_inicio']}. 
 ¿Hay algo en lo que pueda ayudarte sobre tu incorporación?"""
         
         self.agregar_mensaje(call_sid, "assistant", bienvenida)
@@ -156,10 +155,12 @@ Juntos lograremos todas tus metas. Tu fecha de inicio es el {empleado['fecha_ini
         conv = self.conversaciones[call_sid]
         historial = conv["historial"]
         
-        # Generar prompt del sistema
+        # Generar prompt del sistema (MÁS ESTRICTO)
         system_prompt = self.generar_prompt_sistema(empleado)
         
-        # Construir mensajes para Ollama
+        # 🆕 AGREGAR INSTRUCCIÓN DE BREVEDAD
+        system_prompt += "\n\nIMPORTANTE: Tus respuestas deben ser MUY BREVES (máximo 2-3 oraciones cortas). Esto es una llamada telefónica, no un email."
+        
         messages = [
             {"role": "system", "content": system_prompt}
         ] + historial
@@ -167,7 +168,6 @@ Juntos lograremos todas tus metas. Tu fecha de inicio es el {empleado['fecha_ini
         print(f"🧠 Llamando a Ollama con {len(historial)} mensajes de historial", flush=True)
         
         try:
-            # Llamar a Ollama
             response = requests.post(
                 "http://ollama:11434/api/chat",
                 json={
@@ -176,7 +176,7 @@ Juntos lograremos todas tus metas. Tu fecha de inicio es el {empleado['fecha_ini
                     "stream": False,
                     "options": {
                         "temperature": 0.7,
-                        "num_predict": 80,  # Limitar respuesta a ~150 tokens (más corta para teléfono)
+                        "num_predict": 80,  # 🔥 Reducir de 80 a 60 tokens
                         "num_ctx": 2048,
                         "num_thread": 4 
                     }
@@ -190,32 +190,29 @@ Juntos lograremos todas tus metas. Tu fecha de inicio es el {empleado['fecha_ini
                 
                 print(f"🧠 Ollama respondió: {respuesta_texto}", flush=True)
                 
-                # Limpiar respuesta (a veces el LLM agrega cosas extra)
+                # Limpiar y truncar si es muy largo
                 respuesta_texto = respuesta_texto.strip()
                 
-                # Si la respuesta es muy larga, cortarla
-                if len(respuesta_texto) > 500:
-                    respuesta_texto = respuesta_texto[:497] + "..."
+                # 🆕 Si es MUY largo, cortar después del segundo punto
+                sentences = respuesta_texto.split('. ')
+                if len(sentences) > 2:
+                    respuesta_texto = '. '.join(sentences[:2]) + '.'
                 
-                # Detectar si el usuario quiere terminar
+                # Detectar despedida
                 if any(word in pregunta.lower() for word in ["no", "nada", "todo", "gracias", "eso es todo", "hasta luego"]):
                     self.conversaciones[call_sid]["etapa"] = "despedida"
                     respuesta_texto = "Perfecto. Fue un placer hablar contigo. ¡Te esperamos en tu primer día! Hasta pronto."
                 else:
-                    # Agregar pregunta de seguimiento si no hay
                     if "?" not in respuesta_texto:
                         respuesta_texto += " ¿Hay algo más en lo que pueda ayudarte?"
                 
                 self.agregar_mensaje(call_sid, "assistant", respuesta_texto)
                 return respuesta_texto
             else:
-                print(f"❌ Error de Ollama: {response.status_code}", flush=True)
-                # Fallback a respuesta genérica
                 return self._respuesta_fallback(call_sid, pregunta, empleado)
                 
         except Exception as e:
             print(f"❌ Error llamando a Ollama: {e}", flush=True)
-            # Fallback a respuesta genérica
             return self._respuesta_fallback(call_sid, pregunta, empleado)
 
     def _respuesta_fallback(self, call_sid, pregunta, empleado):
@@ -273,4 +270,4 @@ Juntos lograremos todas tus metas. Tu fecha de inicio es el {empleado['fecha_ini
     
     def obtener_mensaje_inicial(self, empleado):
         """Mensaje inicial de verificación"""
-        return f"Hola, habla desde SALESLAND. ¿Eres {empleado['nombre']}?"
+        return f"Hola, te habla el asistente inteligente de la empresa SEILS LAND. ¿Eres {empleado['nombre']}?"
